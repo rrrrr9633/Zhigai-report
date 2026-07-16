@@ -1,0 +1,4 @@
+interface:
+  display_name: "智改数转诊断报告"
+  short_description: "通过授权远程服务生成智改数转诊断报告 DOCX"
+  default_prompt: "Use $zhigai-report to generate a Chinese 智改数转诊断报告 DOCX through the licensed remote generation service."
