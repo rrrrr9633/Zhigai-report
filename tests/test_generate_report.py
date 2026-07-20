@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from docx import Document
+from docx.oxml.ns import qn
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +40,40 @@ class TemplateImageSlotTests(unittest.TestCase):
 
     def generator(self):
         return generate_report.ZhigaiReportGenerator(str(TEMPLATE_PATH))
+
+    def test_equipment_descriptions_use_fangsong_gb2312_body_format(self) -> None:
+        generator = self.generator()
+        descriptions = {
+            "整体情况描述": "设备整体情况",
+            "设备数控化、自动化水平概述": "数控化说明",
+            "设备自动化控制方面": "自动控制说明",
+            "设备互联方面": "设备互联说明",
+            "设备监控与决策方面": "监控决策说明",
+            "设备清单": [],
+        }
+
+        generator.fill_shebei_yingyong(descriptions)
+
+        paragraphs = generator.doc.paragraphs
+        overall = next(paragraph for paragraph in paragraphs if paragraph.text == "设备整体情况")
+        bodies = [
+            next(paragraph for paragraph in paragraphs if paragraph.text == text)
+            for text in ("数控化说明", "自动控制说明", "设备互联说明", "监控决策说明")
+        ]
+        self.assertAlmostEqual(overall.paragraph_format.first_line_indent.pt, 32.0)
+        for paragraph in [overall, *bodies]:
+            self.assertAlmostEqual(paragraph.paragraph_format.line_spacing.pt, 30.0)
+            self.assertEqual(len(paragraph.runs), 1)
+            run = paragraph.runs[0]
+            self.assertEqual(run.font.name, "仿宋_GB2312")
+            self.assertEqual(run._r.rPr.rFonts.get(qn("w:eastAsia")), "仿宋_GB2312")
+            self.assertAlmostEqual(run.font.size.pt, 16.0)
+            self.assertFalse(run.bold)
+        for paragraph in bodies:
+            self.assertIsNotNone(paragraph._p.pPr.numPr)
+            self.assertEqual(paragraph._p.pPr.numPr.numId.val, 3)
+            self.assertEqual(paragraph.paragraph_format.space_before.pt, 0.0)
+            self.assertEqual(paragraph.paragraph_format.space_after.pt, 0.0)
 
     def test_other_section_uses_unnumbered_template_anchor(self) -> None:
         generator = self.generator()
@@ -100,6 +135,11 @@ class TemplateImageSlotTests(unittest.TestCase):
             1,
         )
         self.assertNotIn("包括主营业务", "".join(paragraph.text for paragraph in section))
+        self.assertIn("主要产品", [paragraph.text.strip() for paragraph in section])
+        self.assertIn("产品工艺", [paragraph.text.strip() for paragraph in section])
+        self.assertNotIn("（2）主要产品", [paragraph.text.strip() for paragraph in section])
+        self.assertNotIn("（3）产品工艺", [paragraph.text.strip() for paragraph in section])
+        self.assertNotIn("(1)产品A", [paragraph.text.strip() for paragraph in section])
 
     def test_architecture_image_replaces_template_placeholder_after_layer_content(self) -> None:
         generator = self.generator()
@@ -203,6 +243,60 @@ class TemplateImageSlotTests(unittest.TestCase):
         business = next(paragraph for paragraph in paragraphs if paragraph.text == "主营业务：主营业务事实")
         self.assertIsNotNone(business._p.pPr.numPr)
         self.assertEqual(business._p.pPr.numPr.numId.val, 2)
+
+    def test_pain_analysis_overview_and_details_use_first_line_indent(self) -> None:
+        generator = self.generator()
+        generator.fill_tongdian_fenxi(
+            {
+                "总体概述": "痛点总体概述",
+                "痛点列表": [
+                    {"名称": "生产痛点", "内容": "生产痛点正文"},
+                    {"名称": "质量痛点", "内容": "质量痛点正文"},
+                ],
+            }
+        )
+
+        paragraphs = generator.doc.paragraphs
+        for text in ("痛点总体概述", "生产痛点正文", "质量痛点正文"):
+            paragraph = next(item for item in paragraphs if item.text == text)
+            self.assertAlmostEqual(paragraph.paragraph_format.first_line_indent.pt, 32.0)
+            self.assertAlmostEqual(paragraph.paragraph_format.line_spacing.pt, 30.0)
+
+    def test_project_effects_indent_plain_body_but_not_bullets(self) -> None:
+        generator = self.generator()
+        generator.fill_zhigai_jianshe_fangan(
+            {
+                "企业名称": "测试企业",
+                "建设思路": "建设思路",
+                "建设目标": {"总体目标": "总体目标", "具体目标": {}},
+                "总体方案架构": [],
+                "建设内容描述": [],
+                "项目预期成效": {
+                    "项目概括": "覆盖设备、系统和数据建设",
+                    "智能制造成熟度提升": {
+                        "智能制造成熟度评分": "成熟度提升说明",
+                        "智能工厂梯度培育等级": "梯度等级说明",
+                        "核心能力": "核心能力说明",
+                    },
+                    "效率提升方面": "效率提升正文",
+                    "成本降低方面": "成本降低正文",
+                    "合规与质量成效": "合规质量正文",
+                    "运营与战略成效": "运营战略正文",
+                },
+                "具体改造项目": [],
+            }
+        )
+
+        paragraphs = generator.doc.paragraphs
+        intro = next(item for item in paragraphs if item.text.startswith("本项目覆盖设备"))
+        self.assertAlmostEqual(intro.paragraph_format.first_line_indent.pt, 32.0)
+        for text in ("效率提升正文", "成本降低正文", "合规质量正文", "运营战略正文"):
+            paragraph = next(item for item in paragraphs if item.text == text)
+            self.assertAlmostEqual(paragraph.paragraph_format.first_line_indent.pt, 32.0)
+        bullet = next(item for item in paragraphs if item.text == "智能制造成熟度评分：成熟度提升说明")
+        self.assertIsNotNone(bullet._p.pPr.numPr)
+        bullet_indent = bullet.paragraph_format.first_line_indent
+        self.assertTrue(bullet_indent is None or abs(bullet_indent.pt - 32.0) > 0.01)
 
     def test_dynamic_projects_clone_template_numbering_hierarchy(self) -> None:
         generator = self.generator()
