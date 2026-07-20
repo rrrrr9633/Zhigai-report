@@ -53,6 +53,23 @@ class LicensePreflightTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "缺少授权码"):
             remote_generate.request_license_status("http://example.test", "", 10)
+    def test_require_complete_pain_analysis_rejects_legacy_format(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "痛点分析必须是对象"):
+            remote_generate.require_complete_pain_analysis({"痛点分析": "1. 旧格式"})
+
+    def test_require_complete_pain_analysis_rejects_empty_item_content(self) -> None:
+        data = {
+            "痛点分析": {
+                "总体概述": "总体说明",
+                "痛点列表": [
+                    {"名称": f"痛点{i}", "内容": "正文" if i != 6 else " "}
+                    for i in range(1, 7)
+                ],
+            }
+        }
+
+        with self.assertRaisesRegex(SystemExit, "第 6 项的内容不能为空"):
+            remote_generate.require_complete_pain_analysis(data)
 
 
 if __name__ == "__main__":

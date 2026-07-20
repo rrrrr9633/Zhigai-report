@@ -131,6 +131,27 @@ def require_active_license(status: dict[str, Any]) -> None:
     raise SystemExit(status.get("message") or "授权码无效、已过期或不可用。请提供有效授权码。")
 
 
+def require_complete_pain_analysis(data: dict[str, Any]) -> None:
+    pain_analysis = data.get("痛点分析")
+    if not isinstance(pain_analysis, dict):
+        raise SystemExit("数据校验失败：痛点分析必须是对象，包含总体概述和痛点列表。")
+
+    if not isinstance(pain_analysis.get("总体概述"), str) or not pain_analysis["总体概述"].strip():
+        raise SystemExit("数据校验失败：痛点分析.总体概述不能为空。")
+
+    pain_points = pain_analysis.get("痛点列表")
+    if not isinstance(pain_points, list) or len(pain_points) != 6:
+        raise SystemExit("数据校验失败：痛点分析.痛点列表必须恰好包含 6 项。")
+
+    for index, pain_point in enumerate(pain_points, start=1):
+        if not isinstance(pain_point, dict):
+            raise SystemExit(f"数据校验失败：痛点分析.痛点列表第 {index} 项必须是对象。")
+        for field in ("名称", "内容"):
+            value = pain_point.get(field)
+            if not isinstance(value, str) or not value.strip():
+                raise SystemExit(f"数据校验失败：痛点分析.痛点列表第 {index} 项的{field}不能为空。")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="智改数转报告远程生成客户端")
     parser.add_argument("--data", required=True, help="数据 JSON 文件路径")
@@ -159,6 +180,7 @@ def main() -> None:
     data_path = Path(args.data).expanduser().resolve()
     output_path = Path(args.output).expanduser().resolve()
     data = read_json(data_path)
+    require_complete_pain_analysis(data)
     files: dict[str, dict[str, str]] = {}
     remote_data = collect_uploads(data, files)
 

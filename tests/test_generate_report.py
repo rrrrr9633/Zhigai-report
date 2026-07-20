@@ -372,7 +372,10 @@ class TemplateImageSlotTests(unittest.TestCase):
                 },
                 "痛点分析": {
                     "总体概述": "总体痛点",
-                    "痛点列表": [{"名称": "数据痛点", "内容": "数据未贯通"}],
+                    "痛点列表": [
+                        {"名称": f"痛点{index}", "内容": f"痛点{index}正文"}
+                        for index in range(1, 7)
+                    ],
                 },
                 "智改数转建设方案": {
                     "企业名称": "测试企业",
