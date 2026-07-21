@@ -152,6 +152,90 @@ def require_complete_pain_analysis(data: dict[str, Any]) -> None:
                 raise SystemExit(f"数据校验失败：痛点分析.痛点列表第 {index} 项的{field}不能为空。")
 
 
+def require_complete_maturity_analysis(data: dict[str, Any]) -> None:
+    benchmark = data.get("智能工厂对标分析")
+    confirmation_keys = (
+        "成熟度评分表已上传",
+        "已上传成熟度评分表",
+        "用户已上传成熟度评分表",
+        "成熟度评分表上传确认",
+    )
+    scopes = [data]
+    if isinstance(benchmark, dict):
+        scopes.append(benchmark)
+
+    def is_confirmed(value: Any) -> bool:
+        if value is True:
+            return True
+        return isinstance(value, str) and value.strip().lower() in {
+            "true", "yes", "y", "1", "已上传", "用户已上传", "确认已上传"
+        }
+
+    confirmed = any(
+        is_confirmed(scope.get(key))
+        for scope in scopes
+        for key in confirmation_keys
+    )
+    if not confirmed:
+        return
+    if not isinstance(benchmark, dict) or not benchmark:
+        raise SystemExit("数据校验失败：成熟度评分表已上传时，智能工厂对标分析必须是非空对象。")
+    score = benchmark.get("成熟度总分")
+    if not (
+        isinstance(score, (int, float)) and not isinstance(score, bool)
+        or isinstance(score, str) and score.strip()
+    ):
+        raise SystemExit("数据校验失败：成熟度评分表已上传时，智能工厂对标分析.成熟度总分不能为空。")
+
+
+def require_complete_plan(data: dict[str, Any]) -> None:
+    plan = data.get("智改数转建设方案")
+    project_scopes: list[tuple[str, Any]] = [("改造项目", data.get("改造项目"))]
+    if plan is not None:
+        if not isinstance(plan, dict):
+            raise SystemExit("数据校验失败：智改数转建设方案必须是对象。")
+        for field, content_keys in (
+            ("总体方案架构", ("概述", "内容")),
+            ("建设内容描述", ("建设内容", "内容")),
+        ):
+            sections = plan.get(field)
+            if not isinstance(sections, list) or not sections:
+                raise SystemExit(f"数据校验失败：智改数转建设方案.{field}必须是非空数组。")
+            for index, section in enumerate(sections, start=1):
+                if not isinstance(section, dict) or not any(
+                    isinstance(section.get(key), str) and section[key].strip()
+                    for key in content_keys
+                ):
+                    raise SystemExit(
+                        f"数据校验失败：智改数转建设方案.{field}第 {index} 项必须填写"
+                        f"{'或'.join(content_keys)}。"
+                    )
+        project_scopes.append(("智改数转建设方案.具体改造项目", plan.get("具体改造项目")))
+
+    for path, projects in project_scopes:
+        if projects is None:
+            continue
+        if not isinstance(projects, list):
+            raise SystemExit(f"数据校验失败：{path}必须是数组。")
+        for index, project in enumerate(projects, start=1):
+            if not isinstance(project, dict):
+                raise SystemExit(f"数据校验失败：{path}第 {index} 项必须是对象。")
+            amount = str(project.get("预计投入") or "").strip()
+            payback = str(project.get("投资回报周期") or "").strip()
+            if not any(character.isdigit() for character in amount) or "元" not in amount or "待" in amount:
+                raise SystemExit(
+                    f"数据校验失败：{path}第 {index} 项.预计投入必须填写包含金额单位的数值或区间，不得使用待补充。"
+                )
+            if (
+                not any(character.isdigit() for character in payback)
+                or not ("个月" in payback or "年" in payback)
+                or "待" in payback
+            ):
+                raise SystemExit(
+                    f"数据校验失败：{path}第 {index} 项.投资回报周期必须填写以月或年表示的数值或区间，不得使用待补充。"
+                )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="智改数转报告远程生成客户端")
     parser.add_argument("--data", required=True, help="数据 JSON 文件路径")
@@ -181,6 +265,8 @@ def main() -> None:
     output_path = Path(args.output).expanduser().resolve()
     data = read_json(data_path)
     require_complete_pain_analysis(data)
+    require_complete_maturity_analysis(data)
+    require_complete_plan(data)
     files: dict[str, dict[str, str]] = {}
     remote_data = collect_uploads(data, files)
 

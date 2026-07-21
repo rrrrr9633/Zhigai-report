@@ -35,12 +35,44 @@ class ReportDataValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(report_server.DataValidationError, "第 5 项的内容不能为空"):
             report_server.validate_report_data(data)
 
+    def test_rejects_uploaded_maturity_table_without_benchmark_analysis(self) -> None:
+        data = {"痛点分析": valid_pain_analysis(), "成熟度评分表已上传": True}
+
+        with self.assertRaisesRegex(report_server.DataValidationError, "智能工厂对标分析必须是非空对象"):
+            report_server.validate_report_data(data)
+
+    def test_accepts_uploaded_maturity_table_with_benchmark_score(self) -> None:
+        report_server.validate_report_data(
+            {
+                "痛点分析": valid_pain_analysis(),
+                "成熟度评分表已上传": True,
+                "智能工厂对标分析": {"成熟度总分": "1.60"},
+            }
+        )
+
     def test_rejects_non_six_pain_points(self) -> None:
         data = {"痛点分析": valid_pain_analysis()}
         data["痛点分析"]["痛点列表"].pop()
 
         with self.assertRaisesRegex(report_server.DataValidationError, "恰好包含 6 项"):
             report_server.validate_report_data(data)
+
+    def test_accepts_digital_overview_within_200_characters(self) -> None:
+        report_server.validate_report_data(
+            {
+                "企业数字化智能化现状概述": "现状" * 100,
+                "痛点分析": valid_pain_analysis(),
+            }
+        )
+
+    def test_rejects_digital_overview_over_200_characters(self) -> None:
+        with self.assertRaisesRegex(report_server.DataValidationError, "200 字以内"):
+            report_server.validate_report_data(
+                {
+                    "企业数字化智能化现状概述": "现状" * 101,
+                    "痛点分析": valid_pain_analysis(),
+                }
+            )
 
 
 if __name__ == "__main__":

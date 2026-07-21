@@ -70,6 +70,51 @@ class LicensePreflightTests(unittest.TestCase):
 
         with self.assertRaisesRegex(SystemExit, "第 6 项的内容不能为空"):
             remote_generate.require_complete_pain_analysis(data)
+    def test_require_complete_maturity_analysis_rejects_missing_benchmark(self) -> None:
+        with self.assertRaisesRegex(SystemExit, "智能工厂对标分析必须是非空对象"):
+            remote_generate.require_complete_maturity_analysis({"成熟度评分表已上传": True})
+
+    def test_require_complete_maturity_analysis_accepts_benchmark_score(self) -> None:
+        remote_generate.require_complete_maturity_analysis(
+            {
+                "成熟度评分表已上传": True,
+                "智能工厂对标分析": {"成熟度总分": 1.60},
+            }
+        )
+    def test_require_complete_plan_rejects_project_financial_placeholders(self) -> None:
+        data = {
+            "智改数转建设方案": {
+                "总体方案架构": [{"层级": "基础层", "概述": "建设基础设施。"}],
+                "建设内容描述": [{"名称": "基础层", "建设内容": "完善工控网络。"}],
+                "具体改造项目": [
+                    {
+                        "项目名称": "设备采集",
+                        "预计投入": "待补充",
+                        "投资回报周期": "待评估",
+                    }
+                ],
+            }
+        }
+
+        with self.assertRaisesRegex(SystemExit, "预计投入必须填写包含金额单位的数值或区间"):
+            remote_generate.require_complete_plan(data)
+
+    def test_require_complete_plan_accepts_numeric_estimates(self) -> None:
+        remote_generate.require_complete_plan(
+            {
+                "智改数转建设方案": {
+                    "总体方案架构": [{"层级": "基础层", "概述": "建设基础设施。"}],
+                    "建设内容描述": [{"名称": "基础层", "建设内容": "完善工控网络。"}],
+                    "具体改造项目": [
+                        {
+                            "项目名称": "设备采集",
+                            "预计投入": "60-80万元（估算）",
+                            "投资回报周期": "18-24个月（估算）",
+                        }
+                    ],
+                }
+            }
+        )
 
 
 if __name__ == "__main__":

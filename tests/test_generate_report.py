@@ -75,6 +75,58 @@ class TemplateImageSlotTests(unittest.TestCase):
             self.assertEqual(paragraph.paragraph_format.space_before.pt, 0.0)
             self.assertEqual(paragraph.paragraph_format.space_after.pt, 0.0)
 
+    def test_replaced_equipment_and_software_tables_fill_correct_columns(self) -> None:
+        generator = self.generator()
+        generator.fill_shebei_yingyong(
+            {
+                "整体情况描述": "设备整体情况",
+                "设备清单": [
+                    {
+                        "关键装备种类": "智能加工装备",
+                        "名称": "设备A",
+                        "规格/型号": "型号A",
+                        "单台设备价格": "12",
+                        "系统状态": "在用",
+                        "供应商": "供应商A",
+                        "原厂商所在地": "省内",
+                    }
+                ],
+            }
+        )
+        generator.fill_ruanjian_yingyong(
+            "软件整体情况",
+            [
+                {
+                    "关键软件种类": "经营管理类",
+                    "名称": "ERP",
+                    "规格/型号": "V1",
+                    "部署方式": "本地部署",
+                    "单套软件价格": "20",
+                    "系统状态": "在用",
+                    "供应商": "供应商B",
+                    "原厂商所在地": "国内/省外",
+                }
+            ],
+        )
+
+        equipment = generator._table_by_first_header("关键装备种类")
+        software = generator._table_by_first_header("关键软件种类")
+        self.assertEqual(len(equipment.columns), 7)
+        self.assertEqual(len(software.columns), 8)
+        self.assertEqual(
+            [cell.text for cell in equipment.rows[1].cells],
+            ["智能加工装备", "设备A", "型号A", "12", "在用", "供应商A", "省内"],
+        )
+        self.assertEqual(
+            [cell.text for cell in software.rows[1].cells],
+            ["经营管理类", "ERP", "V1", "本地部署", "20", "在用", "供应商B", "国内/省外"],
+        )
+        for table in (equipment, software):
+            header_properties = table.rows[0]._tr.get_or_add_trPr()
+            self.assertIsNotNone(header_properties.find(qn("w:tblHeader")))
+            for row in table.rows:
+                self.assertIsNotNone(row._tr.get_or_add_trPr().find(qn("w:cantSplit")))
+
     def test_other_section_uses_unnumbered_template_anchor(self) -> None:
         generator = self.generator()
 
@@ -104,14 +156,18 @@ class TemplateImageSlotTests(unittest.TestCase):
             "智能制造成熟度现状分析",
         )
 
-    def test_enterprise_images_stay_inside_enterprise_overview_section(self) -> None:
+    def test_enterprise_images_follow_new_overview_field_slots(self) -> None:
         generator = self.generator()
 
-        generator.fill_qiye_zongti_segmented(
+        generator.fill_qiye_zongti(
             {
-                "总体文字": "总体文字",
-                "主要产品列表": ["产品A"],
-                "产品工艺列表": [{"名称": "产品A", "流程": "工序A→工序B"}],
+                "总体概述": "总体概述正文",
+                "主营业务": "主营业务正文",
+                "主导产品": ["产品A", "产品B"],
+                "主要工艺与设备": [
+                    {"名称": "产品A工艺", "流程": "工序A→工序B；使用设备A"}
+                ],
+                "竞争优势": "竞争优势正文",
             },
             {
                 "第一部分": [str(self.image_path)],
@@ -128,18 +184,17 @@ class TemplateImageSlotTests(unittest.TestCase):
             index for index, paragraph in enumerate(paragraphs) if paragraph.text.strip() == "（三）企业智改数转情况"
         )
         section = paragraphs[overview_heading + 1 : next_heading]
-        self.assertEqual(sum(has_drawing(paragraph) for paragraph in section), 3)
-        self.assertEqual(section[0].text.strip(), "总体文字")
-        self.assertEqual(
-            sum(paragraph.text.strip() == "总体文字" for paragraph in section),
-            1,
-        )
-        self.assertNotIn("包括主营业务", "".join(paragraph.text for paragraph in section))
-        self.assertIn("主要产品", [paragraph.text.strip() for paragraph in section])
-        self.assertIn("产品工艺", [paragraph.text.strip() for paragraph in section])
-        self.assertNotIn("（2）主要产品", [paragraph.text.strip() for paragraph in section])
-        self.assertNotIn("（3）产品工艺", [paragraph.text.strip() for paragraph in section])
-        self.assertNotIn("(1)产品A", [paragraph.text.strip() for paragraph in section])
+        texts = [paragraph.text.strip() for paragraph in section]
+        image_indexes = [index for index, paragraph in enumerate(section) if has_drawing(paragraph)]
+
+        self.assertEqual(len(image_indexes), 3)
+        self.assertEqual(texts[image_indexes[0] - 1], "总体概述正文")
+        self.assertEqual(texts[image_indexes[1] - 1], "产品B")
+        self.assertEqual(texts[image_indexes[2] - 1], "工序A→工序B；使用设备A")
+        self.assertLess(image_indexes[0], texts.index("主营业务：主营业务正文"))
+        self.assertLess(image_indexes[1], texts.index("主要工艺与设备：产品A工艺"))
+        self.assertLess(image_indexes[2], texts.index("竞争优势：竞争优势正文"))
+        self.assertFalse(any(text.startswith("内容要求：包括") for text in texts))
 
     def test_architecture_image_replaces_template_placeholder_after_layer_content(self) -> None:
         generator = self.generator()
@@ -191,10 +246,14 @@ class TemplateImageSlotTests(unittest.TestCase):
         self.assertLess(final_layer_index, slot_image_indexes[0])
         self.assertLess(slot_image_indexes[0], caption_index)
         self.assertLess(caption_index, construction_content_index)
-        self.assertAlmostEqual(generator.doc.inline_shapes[-1].width / 914400, 6.0, places=2)
-        self.assertFalse(
-            any(paragraph.text.strip().endswith("内容") and "决策层" in paragraph.text for paragraph in paragraphs)
+        final_layer_content_index = next(
+            index
+            for index, paragraph in enumerate(paragraphs)
+            if paragraph.text.strip() == "智能决策层（BI+AI 决策）内容"
         )
+        self.assertLess(final_layer_index, final_layer_content_index)
+        self.assertLess(final_layer_content_index, slot_image_indexes[0])
+        self.assertAlmostEqual(generator.doc.inline_shapes[-1].width / 914400, 6.0, places=2)
 
     def test_architecture_without_replacement_retains_template_image_and_caption(self) -> None:
         generator = self.generator()
@@ -226,23 +285,26 @@ class TemplateImageSlotTests(unittest.TestCase):
         self.assertTrue(has_drawing(paragraphs[caption_index - 1]))
         self.assertEqual(len(generator.doc.inline_shapes), 1)
 
-    def test_overview_replaces_template_instruction_and_preserves_bullets(self) -> None:
+    def test_digital_overview_replaces_instruction_before_equipment_section(self) -> None:
         generator = self.generator()
-        generator.fill_zongti_qingkuang(
-            {
-                "主营业务": "主营业务事实",
-                "主导产品": "产品A",
-                "主要工艺": "工艺A",
-                "竞争优势": "优势A",
-                "数字化智能化现状与规划": "现状与规划A",
-            }
-        )
+
+        generator.fill_digital_overview("企业数字化智能化现状概述正文。")
 
         paragraphs = generator.doc.paragraphs
-        self.assertFalse(any(paragraph.text.startswith("内容要求：包括主营业务") for paragraph in paragraphs))
-        business = next(paragraph for paragraph in paragraphs if paragraph.text == "主营业务：主营业务事实")
-        self.assertIsNotNone(business._p.pPr.numPr)
-        self.assertEqual(business._p.pPr.numPr.numId.val, 2)
+        overview_index = next(
+            index
+            for index, paragraph in enumerate(paragraphs)
+            if paragraph.text == "企业数字化智能化现状概述正文。"
+        )
+        equipment_index = next(
+            index
+            for index, paragraph in enumerate(paragraphs)
+            if paragraph.text.strip() == "数字化智能化设备应用情况"
+        )
+        self.assertLess(overview_index, equipment_index)
+        self.assertFalse(
+            any(paragraph.text.startswith("内容要求：XXXXXXXXX") for paragraph in paragraphs)
+        )
 
     def test_pain_analysis_overview_and_details_use_first_line_indent(self) -> None:
         generator = self.generator()
@@ -298,6 +360,73 @@ class TemplateImageSlotTests(unittest.TestCase):
         bullet_indent = bullet.paragraph_format.first_line_indent
         self.assertTrue(bullet_indent is None or abs(bullet_indent.pt - 32.0) > 0.01)
 
+    def test_three_year_plan_fields_take_priority_and_cover_36_months(self) -> None:
+        generator = self.generator()
+        generator.fill_zhigai_jianshe_fangan(
+            {
+                "企业名称": "测试企业",
+                "建设思路": "建设思路",
+                "建设目标": {"总体目标": "总体目标", "具体目标": {}},
+                "三年规划": [
+                    {"阶段": "第一阶段", "时间": "0-12个月", "核心任务": "任务一", "关键成果": "成果一"},
+                    {"阶段": "第二阶段", "时间": "13-24个月", "核心任务": "任务二", "关键成果": "成果二"},
+                    {"阶段": "第三阶段", "时间": "25-36个月", "核心任务": "任务三", "关键成果": "成果三"},
+                ],
+                "两年规划": [
+                    {"阶段": "旧阶段", "时间": "0-24个月", "核心任务": "旧任务", "关键成果": "旧成果"}
+                ],
+                "总体方案架构": [],
+                "建设内容描述": [],
+                "三年实施计划": [
+                    {"阶段": "第一阶段", "周期": "0-12个月", "核心任务": "实施一"},
+                    {"阶段": "第二阶段", "周期": "13-24个月", "核心任务": "实施二"},
+                    {"阶段": "第三阶段", "周期": "25-36个月", "核心任务": "实施三"},
+                ],
+                "两年实施计划": [
+                    {"阶段": "旧阶段", "周期": "0-24个月", "核心任务": "旧实施"}
+                ],
+                "项目预期成效": {},
+                "具体改造项目": [],
+            }
+        )
+
+        paragraph_texts = [paragraph.text.strip() for paragraph in generator.doc.paragraphs]
+        self.assertIn("总体实施计划建议（三年分阶段）", paragraph_texts)
+        self.assertNotIn("总体实施计划建议（两年分阶段）", paragraph_texts)
+
+        planning_table = generator._table_by_headers(["阶段", "时间", "核心任务", "关键指标"])
+        implementation_table = generator._table_by_headers(["阶段", "周期", "核心任务"])
+        self.assertEqual([planning_table.cell(row, 1).text for row in range(1, 4)], ["0-12个月", "13-24个月", "25-36个月"])
+        self.assertEqual([implementation_table.cell(row, 1).text for row in range(1, 4)], ["0-12个月", "13-24个月", "25-36个月"])
+        self.assertNotIn("旧阶段", " ".join(cell.text for table in (planning_table, implementation_table) for row in table.rows for cell in row.cells))
+
+    def test_legacy_two_year_fields_remain_readable_under_three_year_heading(self) -> None:
+        generator = self.generator()
+        generator.fill_zhigai_jianshe_fangan(
+            {
+                "企业名称": "测试企业",
+                "建设思路": "建设思路",
+                "建设目标": {"总体目标": "总体目标", "具体目标": {}},
+                "两年规划": [
+                    {"阶段": "兼容阶段", "时间": "25-36个月", "核心任务": "兼容任务", "关键成果": "兼容成果"}
+                ],
+                "总体方案架构": [],
+                "建设内容描述": [],
+                "两年实施计划": [
+                    {"阶段": "兼容阶段", "周期": "25-36个月", "核心任务": "兼容实施"}
+                ],
+                "项目预期成效": {},
+                "具体改造项目": [],
+            }
+        )
+
+        paragraph_texts = [paragraph.text.strip() for paragraph in generator.doc.paragraphs]
+        self.assertIn("总体实施计划建议（三年分阶段）", paragraph_texts)
+        planning_table = generator._table_by_headers(["阶段", "时间", "核心任务", "关键指标"])
+        implementation_table = generator._table_by_headers(["阶段", "周期", "核心任务"])
+        self.assertEqual(planning_table.cell(1, 0).text, "兼容阶段")
+        self.assertEqual(implementation_table.cell(1, 0).text, "兼容阶段")
+
     def test_dynamic_projects_clone_template_numbering_hierarchy(self) -> None:
         generator = self.generator()
         generator.fill_zhigai_jianshe_fangan(
@@ -315,8 +444,8 @@ class TemplateImageSlotTests(unittest.TestCase):
                         "项目内容": "建设MES",
                         "改造环节": "生产管理",
                         "建设目标": "生产透明化",
-                        "预计投入": "待补充",
-                        "投资回报周期": "待补充",
+                        "预计投入": "80-100万元（估算）",
+                        "投资回报周期": "18-24个月（估算）",
                         "实施步骤": "调研、实施、验收",
                     },
                     {
@@ -325,8 +454,8 @@ class TemplateImageSlotTests(unittest.TestCase):
                         "项目内容": "建设数据中台",
                         "改造环节": "数据治理",
                         "建设目标": "数据贯通",
-                        "预计投入": "待补充",
-                        "投资回报周期": "待补充",
+                        "预计投入": "80-100万元（估算）",
+                        "投资回报周期": "18-24个月（估算）",
                         "实施步骤": "治理、集成、上线",
                     },
                 ],
@@ -369,6 +498,22 @@ class TemplateImageSlotTests(unittest.TestCase):
                     "企业名称": "测试企业",
                     "成熟度总分": "1.0",
                     "成熟度评分图片": str(self.image_path),
+                    "能力子域分析": {
+                        "人员域": [
+                            {
+                                "名称": "战略组织",
+                                "得分": "0.83",
+                                "现状分析": "已开展数字化规划。",
+                                "差距分析": "尚未形成跨部门推进机制。",
+                            },
+                            {
+                                "名称": "人员技能",
+                                "得分": "0.54",
+                                "现状分析": "具备基础操作人员。",
+                                "差距分析": "缺少数据分析与系统运维能力。",
+                            },
+                        ]
+                    },
                 },
                 "痛点分析": {
                     "总体概述": "总体痛点",
@@ -385,7 +530,15 @@ class TemplateImageSlotTests(unittest.TestCase):
                         {"层级": name, "内容": f"{name}内容"} for name in architecture_names
                     ],
                     "总体技术架构图": str(self.image_path),
-                    "建设内容描述": [],
+                    "建设内容描述": [
+                        {
+                            "名称": name.split("（", 1)[0],
+                            "建设内容": f"{name}建设内容",
+                            "建设效果": f"{name}建设效果",
+                            "解决痛点": f"{name}解决痛点",
+                        }
+                        for name in architecture_names
+                    ],
                     "项目预期成效": {},
                     "具体改造项目": [],
                 },
@@ -395,6 +548,14 @@ class TemplateImageSlotTests(unittest.TestCase):
 
         document = Document(output_path)
         paragraphs = document.paragraphs
+        paragraph_texts = [paragraph.text.strip() for paragraph in paragraphs]
+        strategy_index = paragraph_texts.index("战略组织（得分0.83）")
+        self.assertEqual(paragraph_texts[strategy_index + 1], "现状分析：已开展数字化规划。")
+        self.assertEqual(paragraph_texts[strategy_index + 2], "差距分析：尚未形成跨部门推进机制。")
+        self.assertIn("基础层（基础设施保障）内容", paragraph_texts)
+        self.assertIn("基础层（基础设施保障）建设内容", paragraph_texts)
+        self.assertIn("建设效果：基础层（基础设施保障）建设效果", paragraph_texts)
+        self.assertIn("解决痛点：基础层（基础设施保障）解决痛点", paragraph_texts)
         maturity_heading = next(
             index
             for index, paragraph in enumerate(paragraphs)
