@@ -324,6 +324,51 @@ class TemplateImageSlotTests(unittest.TestCase):
             self.assertAlmostEqual(paragraph.paragraph_format.first_line_indent.pt, 32.0)
             self.assertAlmostEqual(paragraph.paragraph_format.line_spacing.pt, 30.0)
 
+    def test_construction_content_renders_all_five_layers_with_requirement_titles(self) -> None:
+        generator = self.generator()
+        layer_data = [
+            ("基础层：数字化基础设施建设（补齐底座）", "车间工业网络建设"),
+            ("设备与控制层：设备联网与数据采集（打通数据入口）", "关键设备联网改造"),
+            ("平台层：数据中台（数据统一枢纽）", "工业物联网平台（IIoT）"),
+            ("业务应用层：核心业务系统全覆盖", "ERP系统完善升级"),
+            ("智能决策层：BI 可视化与运营指挥中心（数据驱动决策）", "生产指挥看板"),
+        ]
+        generator.fill_zhigai_jianshe_fangan(
+            {
+                "企业名称": "测试企业",
+                "建设思路": "建设思路",
+                "建设目标": {"总体目标": "总体目标", "具体目标": {}},
+                "总体方案架构": [],
+                "建设内容描述": [
+                    {
+                        "名称": name,
+                        "建设内容": f"{name}总体建设内容",
+                        "建设效果": f"{name}建设效果",
+                        "解决痛点": f"{name}解决痛点",
+                        "子项": [
+                            {"名称": child, "建设内容": f"{child}具体内容"},
+                        ],
+                    }
+                    for name, child in layer_data
+                ],
+                "项目预期成效": {},
+                "具体改造项目": [],
+            }
+        )
+
+        paragraphs = generator.doc.paragraphs
+        texts = [paragraph.text.strip() for paragraph in paragraphs]
+        for name, child in layer_data:
+            self.assertIn(name, texts)
+            self.assertIn(f"{name}总体建设内容", texts)
+            self.assertIn(f"建设效果：{name}建设效果", texts)
+            self.assertIn(f"解决痛点：{name}解决痛点", texts)
+            child_paragraph = next(
+                paragraph for paragraph in paragraphs if paragraph.text == f"{child}：{child}具体内容"
+            )
+            self.assertIsNotNone(child_paragraph._p.pPr.numPr)
+        self.assertNotIn("研发端 PLM 系统：", texts)
+
     def test_project_effects_indent_plain_body_but_not_bullets(self) -> None:
         generator = self.generator()
         generator.fill_zhigai_jianshe_fangan(
@@ -536,6 +581,7 @@ class TemplateImageSlotTests(unittest.TestCase):
                             "建设内容": f"{name}建设内容",
                             "建设效果": f"{name}建设效果",
                             "解决痛点": f"{name}解决痛点",
+                            "子项": [f"{name}子项建设内容"],
                         }
                         for name in architecture_names
                     ],

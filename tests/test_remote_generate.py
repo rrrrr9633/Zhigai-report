@@ -13,6 +13,25 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(remote_generate)
 
 
+def complete_content_sections() -> list[dict]:
+    return [
+        {
+            "名称": name,
+            "建设内容": f"{layer}建设内容。",
+            "建设效果": f"{layer}建设效果。",
+            "解决痛点": f"{layer}解决痛点。",
+            "子项": [f"{layer}子项：具体建设内容。"],
+        }
+        for layer, name in (
+            ("基础层", "基础层：数字化基础设施建设（补齐底座）"),
+            ("设备与控制层", "设备与控制层：设备联网与数据采集（打通数据入口）"),
+            ("平台层", "平台层：数据中台（数据统一枢纽）"),
+            ("业务应用层", "业务应用层：核心业务系统全覆盖"),
+            ("智能决策层", "智能决策层：BI 可视化与运营指挥中心（数据驱动决策）"),
+        )
+    ]
+
+
 class ApiBaseUrlResolutionTests(unittest.TestCase):
     def test_resolve_api_base_url_uses_cloud_default_without_overrides(self) -> None:
         self.assertEqual(
@@ -81,11 +100,24 @@ class LicensePreflightTests(unittest.TestCase):
                 "智能工厂对标分析": {"成熟度总分": 1.60},
             }
         )
+    def test_require_complete_plan_rejects_missing_content_layer(self) -> None:
+        sections = complete_content_sections()
+        sections.pop()
+        with self.assertRaisesRegex(SystemExit, "缺少层级：智能决策层"):
+            remote_generate.require_complete_plan(
+                {
+                    "智改数转建设方案": {
+                        "总体方案架构": [{"层级": "基础层", "概述": "建设基础设施。"}],
+                        "建设内容描述": sections,
+                    }
+                }
+            )
+
     def test_require_complete_plan_rejects_project_financial_placeholders(self) -> None:
         data = {
             "智改数转建设方案": {
                 "总体方案架构": [{"层级": "基础层", "概述": "建设基础设施。"}],
-                "建设内容描述": [{"名称": "基础层", "建设内容": "完善工控网络。"}],
+                "建设内容描述": complete_content_sections(),
                 "具体改造项目": [
                     {
                         "项目名称": "设备采集",
@@ -104,7 +136,7 @@ class LicensePreflightTests(unittest.TestCase):
             {
                 "智改数转建设方案": {
                     "总体方案架构": [{"层级": "基础层", "概述": "建设基础设施。"}],
-                    "建设内容描述": [{"名称": "基础层", "建设内容": "完善工控网络。"}],
+                    "建设内容描述": complete_content_sections(),
                     "具体改造项目": [
                         {
                             "项目名称": "设备采集",

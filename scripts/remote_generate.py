@@ -188,28 +188,87 @@ def require_complete_maturity_analysis(data: dict[str, Any]) -> None:
         raise SystemExit("数据校验失败：成熟度评分表已上传时，智能工厂对标分析.成熟度总分不能为空。")
 
 
+REQUIRED_CONTENT_LAYERS = (
+    "基础层",
+    "设备与控制层",
+    "平台层",
+    "业务应用层",
+    "智能决策层",
+)
+
+
+def content_layer_key(value: Any) -> str | None:
+    text = str(value or "").strip()
+    for layer in REQUIRED_CONTENT_LAYERS:
+        if layer in text:
+            return layer
+    if "管理应用层" in text:
+        return "业务应用层"
+    return None
+
+
+def has_substantive_content(value: Any) -> bool:
+    if not isinstance(value, str) or not value.strip():
+        return False
+    normalized = value.strip().replace("。", "")
+    return normalized not in {"...", "……", "补充内容", "待补充"}
+
+
+def require_complete_content_sections(sections: Any) -> None:
+    path = "智改数转建设方案.建设内容描述"
+    if not isinstance(sections, list) or not sections:
+        raise SystemExit(f"数据校验失败：{path}必须是包含五个层级的非空数组。")
+
+    normalized: dict[str, tuple[int, dict[str, Any]]] = {}
+    for index, section in enumerate(sections, start=1):
+        if not isinstance(section, dict):
+            raise SystemExit(f"数据校验失败：{path}第 {index} 项必须是对象。")
+        layer = content_layer_key(section.get("名称"))
+        if layer is None:
+            raise SystemExit(f"数据校验失败：{path}第 {index} 项.名称必须对应五层架构中的一个层级。")
+        if layer in normalized:
+            raise SystemExit(f"数据校验失败：{path}中的{layer}重复。")
+        normalized[layer] = (index, section)
+
+    missing_layers = [layer for layer in REQUIRED_CONTENT_LAYERS if layer not in normalized]
+    if missing_layers:
+        raise SystemExit(f"数据校验失败：{path}缺少层级：{'、'.join(missing_layers)}。")
+
+    for layer in REQUIRED_CONTENT_LAYERS:
+        index, section = normalized[layer]
+        item_path = f"{path}第 {index} 项（{layer}）"
+        for field in ("建设内容", "建设效果", "解决痛点"):
+            if not has_substantive_content(section.get(field)):
+                raise SystemExit(f"数据校验失败：{item_path}.{field}必须填写实质内容，不得使用占位文字。")
+        children = section.get("子项")
+        if not isinstance(children, list) or not children:
+            raise SystemExit(f"数据校验失败：{item_path}.子项必须是非空数组。")
+        for child_index, child in enumerate(children, start=1):
+            child_value = child
+            if isinstance(child, dict):
+                child_value = child.get("建设内容") or child.get("内容") or child.get("描述")
+            if not has_substantive_content(child_value):
+                raise SystemExit(f"数据校验失败：{item_path}.子项第 {child_index} 项必须填写实质内容。")
+
+
 def require_complete_plan(data: dict[str, Any]) -> None:
     plan = data.get("智改数转建设方案")
     project_scopes: list[tuple[str, Any]] = [("改造项目", data.get("改造项目"))]
     if plan is not None:
         if not isinstance(plan, dict):
             raise SystemExit("数据校验失败：智改数转建设方案必须是对象。")
-        for field, content_keys in (
-            ("总体方案架构", ("概述", "内容")),
-            ("建设内容描述", ("建设内容", "内容")),
-        ):
-            sections = plan.get(field)
-            if not isinstance(sections, list) or not sections:
-                raise SystemExit(f"数据校验失败：智改数转建设方案.{field}必须是非空数组。")
-            for index, section in enumerate(sections, start=1):
-                if not isinstance(section, dict) or not any(
-                    isinstance(section.get(key), str) and section[key].strip()
-                    for key in content_keys
-                ):
-                    raise SystemExit(
-                        f"数据校验失败：智改数转建设方案.{field}第 {index} 项必须填写"
-                        f"{'或'.join(content_keys)}。"
-                    )
+        sections = plan.get("总体方案架构")
+        if not isinstance(sections, list) or not sections:
+            raise SystemExit("数据校验失败：智改数转建设方案.总体方案架构必须是非空数组。")
+        for index, section in enumerate(sections, start=1):
+            if not isinstance(section, dict) or not any(
+                isinstance(section.get(key), str) and section[key].strip()
+                for key in ("概述", "内容")
+            ):
+                raise SystemExit(
+                    f"数据校验失败：智改数转建设方案.总体方案架构第 {index} 项必须填写概述或内容。"
+                )
+        require_complete_content_sections(plan.get("建设内容描述"))
         project_scopes.append(("智改数转建设方案.具体改造项目", plan.get("具体改造项目")))
 
     for path, projects in project_scopes:
